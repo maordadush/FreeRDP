@@ -2449,7 +2449,8 @@ static BOOL parse_gateway_type_option(rdpSettings* settings, const char* value)
 			if (!freerdp_settings_set_bool(settings, FreeRDP_GatewayRpcTransport, FALSE) ||
 			    !freerdp_settings_set_bool(settings, FreeRDP_GatewayHttpTransport, FALSE) ||
 			    !freerdp_settings_set_bool(settings, FreeRDP_GatewayHttpUseWebsockets, FALSE) ||
-			    !freerdp_settings_set_bool(settings, FreeRDP_GatewayArmTransport, TRUE))
+			    !freerdp_settings_set_bool(settings, FreeRDP_GatewayArmTransport, TRUE) ||
+				!freerdp_settings_set_bool(settings, FreeRDP_RdstlsSecurity, TRUE))
 				return FALSE;
 		}
 	}

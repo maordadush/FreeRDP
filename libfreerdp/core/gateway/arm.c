@@ -282,6 +282,31 @@ arm_create_cleanup:
 	return message;
 }
 
+static BOOL rdp_target_cert_get_element(wStream* s, UINT32* pType, UINT32* pEncoding,
+                                        const BYTE** ptr, size_t* pLength)
+{
+    WINPR_ASSERT(pType);
+    WINPR_ASSERT(pEncoding);
+    WINPR_ASSERT(ptr);
+    WINPR_ASSERT(pLength);
+    if (!Stream_CheckAndLogRequiredLength(TAG, s, 12))
+        return FALSE;
+    UINT32 type = 0;
+    UINT32 encoding = 0;
+    UINT32 elementSize = 0;
+    Stream_Read_UINT32(s, type);
+    Stream_Read_UINT32(s, encoding);
+    Stream_Read_UINT32(s, elementSize);
+    if (!Stream_CheckAndLogRequiredLength(TAG, s, elementSize))
+        return FALSE;
+    *ptr = Stream_ConstPointer(s);
+    *pLength = elementSize;
+    Stream_Seek(s, elementSize);
+    *pType = type;
+    *pEncoding = encoding;
+    return TRUE;
+}
+
 static BOOL arm_fill_gateway_parameters(rdpArm* arm, const char* message)
 {
 	WINPR_ASSERT(arm);
@@ -304,6 +329,111 @@ static BOOL arm_fill_gateway_parameters(rdpArm* arm, const char* message)
 			else
 				status = TRUE;
 		}
+		
+		const cJSON* redirectedServerName = cJSON_GetObjectItemCaseSensitive(json, "redirectedServerName");
+        if (cJSON_IsString(redirectedServerName) && (redirectedServerName->valuestring != NULL))
+        {
+            WLog_DBG(TAG, "redirectedServerName %s", redirectedServerName->valuestring);
+            if (!freerdp_settings_set_string(arm->settings, FreeRDP_RedirectionTargetNetBiosName, redirectedServerName->valuestring))
+                status = FALSE;
+            else
+                status = TRUE;
+        }
+
+        const cJSON* redirectedServerCert = cJSON_GetObjectItemCaseSensitive(json, "redirectedServerCert");
+        if (cJSON_IsString(redirectedServerCert) && (redirectedServerCert->valuestring != NULL))
+        {
+            WLog_DBG(TAG, "extracted redirected Server Cert %s", redirectedServerCert->valuestring);
+            BYTE* base64 = NULL;
+            size_t base64_length;
+            char* tmp = NULL;
+            BYTE* cert_meta_element = NULL;
+            size_t cer_meta_element_length;
+            WLog_DBG(TAG, "redirectedServerCert->valuestring %d", strlen(redirectedServerCert->valuestring));
+            crypto_base64_decode(redirectedServerCert->valuestring, strlen(redirectedServerCert->valuestring), &base64, &base64_length);
+            size_t sz = 0;
+            tmp = ConvertWCharNToUtf8Alloc((WCHAR *) base64, base64_length / 2, &sz);
+            WLog_DBG(TAG, "tmp %d", sz);
+            winpr_HexDump("arm", WLOG_DEBUG, tmp, sz);
+            crypto_base64_decode(tmp, sz, &cert_meta_element, &cer_meta_element_length);
+            winpr_HexDump("arm", WLOG_DEBUG, cert_meta_element, cer_meta_element_length);
+            wStream sbuffer = { 0 };
+            wStream* s = Stream_StaticConstInit(&sbuffer, cert_meta_element, cer_meta_element_length);
+            size_t plength = 0;
+            const BYTE* ptr = NULL;
+            while (Stream_GetRemainingLength(s) > 0)
+            {
+                UINT32 type = 0;
+                UINT32 encoding = 0;
+                if (!rdp_target_cert_get_element(s, &type, &encoding, &ptr, &plength))
+                    status = FALSE;
+                switch (type)
+                {
+                    case ELEMENT_TYPE_CERTIFICATE:
+                        if (encoding == ENCODING_TYPE_ASN1_DER)
+                        {
+                            if (arm->context->settings->RedirectionTargetCertificate)
+                                WLog_WARN(TAG, "Duplicate TargetCertificate in data detected!");
+                            else
+                            {
+                                WLog_DBG(TAG, "type: %d encoding: %d plength: %d", type, encoding, plength);
+                                arm->context->settings->RedirectionTargetCertificate =
+                                    freerdp_certificate_new_from_der(ptr, plength);
+                                winpr_HexDump("arm", WLOG_DEBUG, arm->context->settings->RedirectionTargetCertificate, plength);
+                            }
+                        }
+                        break;
+                    default: /* ignore unknown fields */
+                        WLog_WARN(TAG,
+                              "Unknown TargetCertificate field type %" PRIu32 ", encoding %" PRIu32
+                              " of length %" PRIu32,
+                              type, encoding, plength);
+                        break;
+                }
+            }
+        }
+
+        const cJSON* redirectedAuthBlob = cJSON_GetObjectItemCaseSensitive(json, "redirectedAuthBlob");
+        if (cJSON_IsString(redirectedAuthBlob) && (redirectedAuthBlob->valuestring != NULL))
+        {
+            WLog_DBG(TAG, "extracted redirected auth blob %s", redirectedAuthBlob->valuestring);
+            BYTE* base64 = NULL;
+            size_t base64_length;
+            char* tmp = NULL;
+            BYTE* auth_blob = NULL;
+            size_t auth_blob_length;
+            crypto_base64_decode(redirectedAuthBlob->valuestring, strlen(redirectedAuthBlob->valuestring), &base64, &base64_length);
+            size_t sz = 0;
+            tmp = ConvertWCharNToUtf8Alloc((WCHAR *) base64, base64_length / 2, &sz);
+            WLog_DBG(TAG, "tmp %d", sz);
+            winpr_HexDump("arm", WLOG_DEBUG, tmp, sz);
+            crypto_base64_decode(tmp, sz, &auth_blob, &auth_blob_length);
+            winpr_HexDump("arm", WLOG_DEBUG, auth_blob, auth_blob_length);
+            freerdp_settings_set_uint32(arm->context->settings, FreeRDP_RedirectionPasswordLength, auth_blob_length);
+            if (!freerdp_settings_set_pointer_len(arm->context->settings, FreeRDP_RedirectionPassword, auth_blob,
+                                          auth_blob_length))
+                status = FALSE;
+            else
+                status = TRUE;
+        }
+        const cJSON* redirectedAuthGuid = cJSON_GetObjectItemCaseSensitive(json, "redirectedAuthGuid");
+        if (cJSON_IsString(redirectedAuthGuid) && (redirectedAuthGuid->valuestring != NULL))
+        {
+            WLog_DBG(TAG, "extracted redirected auth guid %s", redirectedAuthGuid->valuestring);
+            BYTE* auth_guid = NULL;
+            size_t auth_guid_length;
+            crypto_base64_decode(redirectedAuthGuid->valuestring, strlen(redirectedAuthGuid->valuestring), &auth_guid, &auth_guid_length);
+            winpr_HexDump("arm", WLOG_DEBUG, auth_guid, auth_guid_length);
+            freerdp_settings_set_uint32(arm->context->settings, FreeRDP_RedirectionGuidLength, auth_guid_length);
+            if (!freerdp_settings_set_pointer_len(arm->context->settings, FreeRDP_RedirectionGuid, auth_guid,
+                                          auth_guid_length))
+                status = FALSE;
+            else
+                status = TRUE;
+        }
+        if (!freerdp_settings_set_bool(arm->context->settings, FreeRDP_RdstlsSecurity, TRUE))
+                status = FALSE;
+
 		cJSON_Delete(json);
 	}
 	return status;
