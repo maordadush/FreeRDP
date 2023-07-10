@@ -257,36 +257,36 @@ arm_create_cleanup:
 	return message;
 }
 
-static BOOL rdp_target_cert_get_element(wStream* s, UINT32* pType, UINT32* pEncoding,
-                                        const BYTE** ptr, size_t* pLength)
-{
-	WINPR_ASSERT(pType);
-	WINPR_ASSERT(pEncoding);
-	WINPR_ASSERT(ptr);
-	WINPR_ASSERT(pLength);
+// static BOOL rdp_target_cert_get_element(wStream* s, UINT32* pType, UINT32* pEncoding,
+//                                         const BYTE** ptr, size_t* pLength)
+// {
+// 	WINPR_ASSERT(pType);
+// 	WINPR_ASSERT(pEncoding);
+// 	WINPR_ASSERT(ptr);
+// 	WINPR_ASSERT(pLength);
 
-	if (!Stream_CheckAndLogRequiredLength(TAG, s, 12))
-		return FALSE;
+// 	if (!Stream_CheckAndLogRequiredLength(TAG, s, 12))
+// 		return FALSE;
 
-	UINT32 type = 0;
-	UINT32 encoding = 0;
-	UINT32 elementSize = 0;
+// 	UINT32 type = 0;
+// 	UINT32 encoding = 0;
+// 	UINT32 elementSize = 0;
 
-	Stream_Read_UINT32(s, type);
-	Stream_Read_UINT32(s, encoding);
-	Stream_Read_UINT32(s, elementSize);
+// 	Stream_Read_UINT32(s, type);
+// 	Stream_Read_UINT32(s, encoding);
+// 	Stream_Read_UINT32(s, elementSize);
 
-	if (!Stream_CheckAndLogRequiredLength(TAG, s, elementSize))
-		return FALSE;
+// 	if (!Stream_CheckAndLogRequiredLength(TAG, s, elementSize))
+// 		return FALSE;
 
-	*ptr = Stream_ConstPointer(s);
-	*pLength = elementSize;
-	Stream_Seek(s, elementSize);
+// 	*ptr = Stream_ConstPointer(s);
+// 	*pLength = elementSize;
+// 	Stream_Seek(s, elementSize);
 
-	*pType = type;
-	*pEncoding = encoding;
-	return TRUE;
-}
+// 	*pType = type;
+// 	*pEncoding = encoding;
+// 	return TRUE;
+// }
 
 static BOOL arm_fill_gateway_parameters(rdpArm* arm, const char* message)
 {
@@ -326,52 +326,67 @@ static BOOL arm_fill_gateway_parameters(rdpArm* arm, const char* message)
 			BYTE* base64 = NULL;
 			size_t base64_length;
 			char* tmp = NULL;
-			BYTE* cert_meta_element = NULL;
-			size_t cer_meta_element_length;
+			// BYTE* cert_meta_element = NULL;
+			// size_t cer_meta_element_length;
 
 			WLog_DBG(TAG, "redirectedServerCert->valuestring %d", strlen(redirectedServerCert->valuestring));
 			crypto_base64_decode(redirectedServerCert->valuestring, strlen(redirectedServerCert->valuestring), &base64, &base64_length);
-			size_t sz = 0;
-			tmp = ConvertWCharNToUtf8Alloc((WCHAR *) base64, base64_length / 2, &sz);
-			WLog_DBG(TAG, "tmp %d", sz);
-			winpr_HexDump("arm", WLOG_DEBUG, tmp, sz);
-			crypto_base64_decode(tmp, sz, &cert_meta_element, &cer_meta_element_length);
-			winpr_HexDump("arm", WLOG_DEBUG, cert_meta_element, cer_meta_element_length);
+			// size_t sz = 0;
+			//size_t wCER_len;
+			//tmp = ConvertWCharNToUtf8Alloc((WCHAR *) base64, base64_length / 2, &sz);
+			//WLog_DBG(TAG, "tmp %d", sz);
+			//winpr_HexDump("arm", WLOG_DEBUG, tmp, sz);
 
-			wStream sbuffer = { 0 };
-			wStream* s = Stream_StaticConstInit(&sbuffer, cert_meta_element, cer_meta_element_length);
-			size_t plength = 0;
-			const BYTE* ptr = NULL;
-			while (Stream_GetRemainingLength(s) > 0)
+			tmp = calloc(sizeof(char),base64_length + 2);
+			memcpy(tmp,base64,base64_length);
+			// tmp[base64_length + 1] = '\r';
+			// tmp[base64_length + 3] = '\n';
+			winpr_HexDump("arm", WLOG_DEBUG, tmp, base64_length + 2);
+
+			if (!freerdp_settings_set_pointer(arm->context->settings, FreeRDP_RedirectionTargetCertificate, tmp))
+				status = FALSE;
+			else
 			{
-				UINT32 type = 0;
-				UINT32 encoding = 0;
-				if (!rdp_target_cert_get_element(s, &type, &encoding, &ptr, &plength))
-					status = FALSE;
-				switch (type)
-				{		
-					case ELEMENT_TYPE_CERTIFICATE:
-						if (encoding == ENCODING_TYPE_ASN1_DER)
-						{
-							if (arm->context->settings->RedirectionTargetCertificate)
-								WLog_WARN(TAG, "Duplicate TargetCertificate in data detected!");
-							else
-							{
-								WLog_DBG(TAG, "type: %d encoding: %d plength: %d", type, encoding, plength);
-								arm->context->settings->RedirectionTargetCertificate =
-								    freerdp_certificate_new_from_der(ptr, plength);
-								winpr_HexDump("arm", WLOG_DEBUG, arm->context->settings->RedirectionTargetCertificate, plength);	
-							}
-						}
-						break;
-					default: /* ignore unknown fields */
-						WLog_WARN(TAG,
-					          "Unknown TargetCertificate field type %" PRIu32 ", encoding %" PRIu32
-					          " of length %" PRIu32,
-					          type, encoding, plength);
-						break;
-				}	
+				status = TRUE;
 			}
+
+			// crypto_base64_decode(tmp, sz, &cert_meta_element, &cer_meta_element_length);
+			// winpr_HexDump("arm", WLOG_DEBUG, cert_meta_element, cer_meta_element_length);
+
+			// wStream sbuffer = { 0 };
+			// wStream* s = Stream_StaticConstInit(&sbuffer, cert_meta_element, cer_meta_element_length);
+			// size_t plength = 0;
+			// const BYTE* ptr = NULL;
+			// while (Stream_GetRemainingLength(s) > 0)
+			// {
+			// 	UINT32 type = 0;
+			// 	UINT32 encoding = 0;
+			// 	if (!rdp_target_cert_get_element(s, &type, &encoding, &ptr, &plength))
+			// 		status = FALSE;
+			// 	switch (type)
+			// 	{		
+			// 		case ELEMENT_TYPE_CERTIFICATE:
+			// 			if (encoding == ENCODING_TYPE_ASN1_DER)
+			// 			{
+			// 				if (arm->context->settings->RedirectionTargetCertificate)
+			// 					WLog_WARN(TAG, "Duplicate TargetCertificate in data detected!");
+			// 				else
+			// 				{
+			// 					WLog_DBG(TAG, "type: %d encoding: %d plength: %d", type, encoding, plength);
+			// 					arm->context->settings->RedirectionTargetCertificate =
+			// 					    freerdp_certificate_new_from_der(ptr, plength);
+			// 					winpr_HexDump("arm", WLOG_DEBUG, arm->context->settings->RedirectionTargetCertificate, plength);	
+			// 				}
+			// 			}
+			// 			break;
+			// 		default: /* ignore unknown fields */
+			// 			WLog_WARN(TAG,
+			// 		          "Unknown TargetCertificate field type %" PRIu32 ", encoding %" PRIu32
+			// 		          " of length %" PRIu32,
+			// 		          type, encoding, plength);
+			// 			break;
+			// 	}	
+			// }
 
 		}
 		
@@ -384,15 +399,15 @@ static BOOL arm_fill_gateway_parameters(rdpArm* arm, const char* message)
 
 
 			crypto_base64_decode(redirectedAuthBlob->valuestring, strlen(redirectedAuthBlob->valuestring), &base64, &base64_length);
-			char* tmp = calloc(sizeof(char),base64_length + 6);
+			char* tmp = calloc(sizeof(char),base64_length + 2);
 			memcpy(tmp,base64,base64_length);
-			tmp[base64_length + 1] = '\r';
-			tmp[base64_length + 3] = '\n';
+			// tmp[base64_length + 1] = '\r';
+			// tmp[base64_length + 3] = '\n';
 
-			winpr_HexDump("arm", WLOG_DEBUG, tmp, base64_length + 6);
+			winpr_HexDump("arm", WLOG_DEBUG, tmp, base64_length + 2);
 
 			if (!freerdp_settings_set_pointer_len(arm->context->settings, FreeRDP_RedirectionPassword, tmp,
-	                                      base64_length + 6))
+	                                      base64_length + 2))
 				status = FALSE;
 			else
 			{
@@ -454,12 +469,12 @@ static BOOL arm_fill_gateway_parameters(rdpArm* arm, const char* message)
 			
 			size_t wGUID_len;
 			WCHAR* wGUID = ConvertUtf8ToWCharAlloc(redirectedAuthGuid->valuestring, &wGUID_len);
-			tmp = calloc(sizeof(char),wGUID_len * 2 + 6);
+			tmp = calloc(sizeof(char),wGUID_len * 2 + 2);
 			memcpy(tmp,wGUID,wGUID_len * 2);
-			tmp[wGUID_len * 2 + 1] = '\r';
-			tmp[wGUID_len * 2 + 3] = '\n';
-			winpr_HexDump("arm", WLOG_DEBUG, tmp, wGUID_len * 2 + 6);
-			if (!freerdp_settings_set_pointer_len(arm->context->settings, FreeRDP_RedirectionGuid, tmp, wGUID_len * 2 + 6))
+			// tmp[wGUID_len * 2 + 1] = '\r';
+			// tmp[wGUID_len * 2 + 3] = '\n';
+			winpr_HexDump("arm", WLOG_DEBUG, tmp, wGUID_len * 2 + 2);
+			if (!freerdp_settings_set_pointer_len(arm->context->settings, FreeRDP_RedirectionGuid, tmp, wGUID_len * 2 + 2))
 				status = FALSE;
 			else
 				status = TRUE;
